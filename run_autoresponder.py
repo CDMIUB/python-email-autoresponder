@@ -13,6 +13,7 @@ from _socket import gaierror
 
 config = None
 config_file_path = "autoresponder.config.ini"
+config_file_path = "autoresponder.config.dev"
 incoming_mail_server = None
 outgoing_mail_server = None
 statistics = {
@@ -30,6 +31,7 @@ def run():
     initialize_configuration()
     connect_to_mail_servers()
     check_folder_names()
+    check_local_path()
     mails = fetch_emails()
     for mail in mails:
         process_email(mail)
@@ -67,10 +69,30 @@ def initialize_configuration():
             'folders.trash': cast(config_file["mail server settings"]["mailserver.incoming.folders.trash.name"], str),
             'request.from': cast(config_file["mail content settings"]["mail.request.from"], str),
             'reply.subject': cast(config_file["mail content settings"]["mail.reply.subject"], str).strip(),
-            'reply.body': cast(config_file["mail content settings"]["mail.reply.body"], str).strip()
+            'reply.body': cast(config_file["mail content settings"]["mail.reply.body"], str).strip(),
         }
     except KeyError as e:
         shutdown_with_error("Configuration file is invalid! (Key not found: " + str(e) + ")")
+    depends = {
+        'nothing': None,
+        'delete': None,
+        'forward': 'post.address',
+        'move': 'post.folder',
+        'download': 'post.path',
+    }
+    try:
+        config['post.action'] = cast(config_file["post-reply action settings"]["post.action"], str).strip()
+        if config['post.action'] not in depends:
+          shutdown_with_error("Post-reply action {} is invalid!".format(config['post.action']))
+    except KeyError:
+        config['post.action'] = 'nothing'
+        
+    dkey=depends[config['post.action']]
+    if dkey is not None:
+      try:
+          config[dkey]= cast(config_file["post-reply action settings"][dkey], str).strip()
+      except KeyError as e:
+          shutdown_with_error("Configuration file is invalid! (post.action = "+config['post.action']+" reqires "+dkey)
 
 
 def connect_to_mail_servers():
@@ -79,15 +101,23 @@ def connect_to_mail_servers():
 
 
 def check_folder_names():
+    global incoming_mail_server
+    global outgoing_mail_server
     (retcode, msg_count) = incoming_mail_server.select(config['folders.inbox'])
-    if retcode != "OK":
+    if retcode != "OK" or re.match('[^0-9]',msg_count[0].decode()):
         shutdown_with_error("Inbox folder does not exist: " + config['folders.inbox'])
     (retcode, msg_count) = incoming_mail_server.select(config['folders.trash'])
-    if retcode != "OK":
+    if retcode != "OK" or re.match('[^0-9]',msg_count[0].decode()):
         shutdown_with_error("Trash folder does not exist: " + config['folders.trash'])
+    if 'post.folder' not in config:    
+      return()
+    (retcode, msg_count) = incoming_mail_server.select(config['post.folder'])
+    if retcode != "OK" or re.match('[^0-9]',msg_count[0].decode()):
+        shutdown_with_error("Destination folder does not exist: " + config['post.folder'])
 
 
 def connect_to_imap():
+    global incoming_mail_server
     try:
         do_connect_to_imap()
     except gaierror:
@@ -107,6 +137,7 @@ def do_connect_to_imap():
 
 
 def connect_to_smtp():
+    global outgoing_mail_server
     try:
         do_connect_to_smtp()
     except gaierror:
@@ -127,6 +158,8 @@ def do_connect_to_smtp():
 
 
 def fetch_emails():
+    global incoming_mail_server
+    global outgoing_mail_server
     # get the message ids from the inbox folder
     incoming_mail_server.select(config['folders.inbox'])
     (retcode, message_indices) = incoming_mail_server.search(None, 'ALL')
@@ -160,9 +193,18 @@ def process_email(mail):
         mail_from = email.header.decode_header(mail['From'])
         mail_sender = mail_from[-1]
         mail_sender = cast(mail_sender[0], str, 'UTF-8')
-        if config['request.from'] in mail_sender:
+        if config['request.from'] in mail_sender or config['request.from'] == '':
             reply_to_email(mail)
-            delete_email(mail)
+            if config['post.action'] == 'delete':
+              delete_email(mail)
+            elif config['post.action'] == 'forward':
+              forward_email(mail)
+            elif config['post.action'] == 'move':
+              move_email(mail)
+            elif config['post.action'] == 'download':
+              download_email(mail)
+            else:
+              pass
         else:
             statistics['mails_wrong_sender'] += 1
         statistics['mails_processed'] += 1
@@ -171,7 +213,18 @@ def process_email(mail):
 
 
 def reply_to_email(mail):
-    receiver_email = email.header.decode_header(mail['Reply-To'])[0][0]
+    global outgoing_mail_server
+    try:
+        receiver_emails = email.header.decode_header(mail['Reply-To'])
+    except TypeError:
+        receiver_emails = email.header.decode_header(mail['From'])
+    #get actual email adress, in case field entry is in form "John Doe <john@example.com>"    
+    for x,e in receiver_emails:
+      e = 'utf-8' if e is None else e
+      y = x.decode(e) if isinstance(x,bytes) else x
+      if '@' in y:
+        receiver_email = y
+        break
     message = email.mime.text.MIMEText(config['reply.body'])
     message['Subject'] = config['reply.subject']
     message['To'] = receiver_email
@@ -179,8 +232,64 @@ def reply_to_email(mail):
         cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail']))
     outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string())
 
+def forward_email(mail):
+    global outgoing_mail_server
+    sender = email.header.decode_header(mail['From'])
+    parts = []
+    for x,e in sender :
+      e = 'utf-8' if e is None else e
+      y = x.decode(e) if isinstance(x,bytes) else x
+      parts.append(y)
+    prefix = '''
+    
+Forwarded email from {}
+------------------------------------------------------------------  
+
+    '''.format(' '.join(parts))  
+    message = email.mime.text.MIMEText(prefix + mail.as_string())
+    receiver_email = config['post.address']
+    message['Subject'] = 'Fwd: {}'.format(mail['Subject'])
+    message['To'] = receiver_email
+    message['From'] = email.utils.formataddr((
+        cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail']))
+    outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string())
+    delete_email(mail)
+
+def move_email(mail):
+    global incoming_mail_server
+    mail_uid=mail['mailserver_email_uid']
+    retcode,_ = incoming_mail_server.uid('COPY', mail_uid, config['post.folder'])
+    if retcode != "OK":
+        shutdown_with_error("Failed moving message to folder: " + config['post.folder'])
+    else:
+        delete_email(mail)
+
+def check_local_path():
+    if not 'post.path' in config:
+        return()
+    path = config['post.path']
+    if not os.path.isdir(path):
+        shutdown_with_error("Local directory does not exist: "+path)
+    if not os.access(path, os.W_OK):
+        shutdown_with_error("Cannot write to local directory: "+path)
+        
+def download_email(mail):
+    subject = email.header.decode_header(mail['Subject'])
+    parts = []
+    for x,e in subject :
+      e = 'utf-8' if e is None else e
+      y = x.decode(e) if isinstance(x,bytes) else x
+      parts.append(y)
+    short='_'.join(parts[0:min(len(y),5)])
+    mail_uid=mail['mailserver_email_uid']
+    filename = '{}_{}.txt'.format(mail_uid,short)
+    path=os.path.join(config['post.path'],filename)
+    with open(path,'wb') as f:
+      f.write(mail.as_string().encode('utf-8'))
+    delete_email(mail)
 
 def delete_email(mail):
+    global incoming_mail_server
     result = incoming_mail_server.uid('COPY', mail['mailserver_email_uid'], config['folders.trash'])
     if result[0] == "OK":
         statistics['mails_in_trash'] += 1
@@ -212,7 +321,7 @@ def shutdown_with_error(message):
     if config is not None:
         message += "\nCurrent configuration: " + str(config)
     print(message)
-    shutdown(-1)
+    shutdown(1)
 
 
 def log_warning(message):
@@ -264,7 +373,8 @@ def shutdown(error_code):
             outgoing_mail_server.quit()
         except Exception:
             pass
-    exit(error_code)
+    if error_code != 0:
+      raise SystemExit
 
 
 run()

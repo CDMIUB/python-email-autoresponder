@@ -2,7 +2,12 @@
 
 Simple python script that connects to a mail server via IMAP and SMTP and replies to 
 all emails in the inbox coming from a certain sender address using the Reply-To header.
-Mails that have been replied to are deleted afterwards.
+
+The user can select varoius action to take after a Mails has been replied
+to: leave as it is, delete, forward to another address (and delete from the
+inbox), move to a different folder on the imap server or download to a local
+directory (and delete from the inbox)
+ 
 
 ### Dependencies
 
@@ -56,6 +61,15 @@ The required configuration items for the individual sections are listed below.
 | mail.request.from  | The sender email address to check new mails against. If an email is found in the inbox with this sender address, a reply is triggered. |
 | mail.reply.subject | The subject line of the reply email. |
 | mail.reply.body    | The plain text body of the reply email. |
+
+**[post-reply action settings]**
+
+| Configuration Item | Description |
+| ------------------ | ----------- |
+|post.action         | action to take after responding ("nothing", "delete", "forward", "move" or "download")
+|post.address        | address to forward message to (reqired for action "forward")
+|post.folder         | folder on the imap server where message should be moved (reqired for action "move")
+|post.path           | locale folder where message should be saved (reqired for action "download")
 
 After configuring the project, you can run it manually to test if your configuration works.
 
