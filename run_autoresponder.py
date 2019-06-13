@@ -17,7 +17,6 @@ from _socket import gaierror
 
 config = None
 config_file_path = "autoresponder.config.ini"
-config_file_path = "autoresponder.config.dev"
 incoming_mail_server = None
 outgoing_mail_server = None
 statistics = {
