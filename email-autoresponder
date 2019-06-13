@@ -1,0 +1,6 @@
+#/bin/bash
+
+FULL=$( readlink -f $0 )
+cd $( dirname $FULL )
+./run_autoresponder.py
+

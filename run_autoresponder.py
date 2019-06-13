@@ -249,7 +249,17 @@ Forwarded email from {}
 ------------------------------------------------------------------  
 
     '''.format(' '.join(parts))  
-    message = email.mime.text.MIMEText(prefix + mail.as_string())
+    message = email.message.Message(policy=email.policy.Compat32())
+    if mail.is_multipart():
+      payload=mail.get_payload()
+      text = payload[0].get_payload()
+      text = prefix + text
+      payload[0].set_payload(text,'utf-8')
+      message.set_payload(payload)
+    else:
+      text=mail.get_payload()
+      text = prefix + text
+      message.set_payload(text,'utf-8')
     receiver_email = config['post.address']
     message['Subject'] = 'Fwd: {}'.format(mail['Subject'])
     message['To'] = receiver_email
