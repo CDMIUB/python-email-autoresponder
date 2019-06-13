@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # Copyright (C) 2017-2019 sunborn23@github.com
 # Copyright (C) 2019 CDMIUB@github.com
