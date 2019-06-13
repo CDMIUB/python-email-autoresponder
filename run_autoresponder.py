@@ -1,4 +1,8 @@
 #!/usr/bin/python
+
+# Copyright (C) 2017-2019 sunborn23@github.com
+# Copyright (C) 2019 CDMIUB@github.com
+
 import configparser
 import datetime
 import email
