@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Copyright (C) 2017-2019 sunborn23@github.com
-# Copyright (C) 2019 CDMIUB@github.com
+# Copyright (C) 2019-21 CDMIUB@github.com
 
 import configparser
 import datetime
@@ -13,9 +13,11 @@ import imaplib
 import os
 import re
 import smtplib
-import sys
+import argparse
+import logging
 from _socket import gaierror
 
+logging.basicConfig(level=logging.INFO)
 config = None
 config_file_path = "autoresponder.config.ini"
 incoming_mail_server = None
@@ -44,11 +46,13 @@ def run():
 
 
 def get_config_file_path():
-    if "--help" in sys.argv or "-h" in sys.argv:
-        display_help_text()
-    if "--config-path" in sys.argv and len(sys.argv) >= 3:
-        global config_file_path
-        config_file_path = sys.argv[2]
+    global config_file_path
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config-path',
+                        nargs=1,
+                        default=config_file_path,
+                        help='path to configuration file')
+    config_file_path = parser.parse_args().config_path[0]
     if not os.path.isfile(config_file_path):
         shutdown_with_error("Configuration file not found. Expected it at '" + config_file_path + "'.")
 
@@ -72,6 +76,7 @@ def initialize_configuration():
             'folders.inbox': cast(config_file["mail server settings"]["mailserver.incoming.folders.inbox.name"], str),
             'folders.trash': cast(config_file["mail server settings"]["mailserver.incoming.folders.trash.name"], str),
             'request.from': cast(config_file["mail content settings"]["mail.request.from"], str),
+            'reply.disable': cast(config_file["mail content settings"]["mail.reply.disable"], str).strip(),
             'reply.subject': cast(config_file["mail content settings"]["mail.reply.subject"], str).strip(),
             'reply.body': cast(config_file["mail content settings"]["mail.reply.body"], str).strip(),
         }
@@ -90,12 +95,12 @@ def initialize_configuration():
           shutdown_with_error("Post-reply action {} is invalid!".format(config['post.action']))
     except KeyError:
         config['post.action'] = 'nothing'
-        
+
     dkey=depends[config['post.action']]
     if dkey is not None:
       try:
           config[dkey]= cast(config_file["post-reply action settings"][dkey], str).strip()
-      except KeyError as e:
+      except KeyError:
           shutdown_with_error("Configuration file is invalid! (post.action = "+config['post.action']+" reqires "+dkey)
 
 
@@ -113,7 +118,7 @@ def check_folder_names():
     (retcode, msg_count) = incoming_mail_server.select(config['folders.trash'])
     if retcode != "OK" or re.match('[^0-9]',msg_count[0].decode()):
         shutdown_with_error("Trash folder does not exist: " + config['folders.trash'])
-    if 'post.folder' not in config:    
+    if 'post.folder' not in config:
       return()
     (retcode, msg_count) = incoming_mail_server.select(config['post.folder'])
     if retcode != "OK" or re.match('[^0-9]',msg_count[0].decode()):
@@ -162,6 +167,7 @@ def do_connect_to_smtp():
 
 
 def fetch_emails():
+    global statistics
     global incoming_mail_server
     global outgoing_mail_server
     # get the message ids from the inbox folder
@@ -182,10 +188,10 @@ def fetch_emails():
                     messages.append(message)
                 else:
                     statistics['mails_loading_error'] += 1
-                    log_warning("Failed to get UID for email with index '" + message_index + "'.")
+                    logging.warning("Failed to get UID for email with index '" + message_index + "'.")
             else:
                 statistics['mails_loading_error'] += 1
-                log_warning("Failed to get email with index '" + message_index + "'.")
+                logging.warning("Failed to get email with index '" + message_index + "'.")
         statistics['mails_total'] = len(messages)
         return messages
     else:
@@ -193,27 +199,40 @@ def fetch_emails():
 
 
 def process_email(mail):
+    global statistics
+    logging.debug('processing email #{}'.format(statistics['mails_processed']))
 #    try:
-        mail_from = email.header.decode_header(mail['From'])
-        mail_sender = mail_from[-1]
-        mail_sender = cast(mail_sender[0], str, 'UTF-8')
-        if config['request.from'] in mail_sender or config['request.from'] == '':
+    mail_from = email.header.decode_header(mail['From'])
+    mail_sender = mail_from[-1]
+    mail_sender = cast(mail_sender[0], str, 'UTF-8')
+    logging.debug(f'... from {mail_sender}')
+    if config['request.from'] in mail_sender or config['request.from'] == '':
+        logging.debug(f'... sender wanted')
+        # reply action
+        if config['reply.disable'] in ['false', 'False', 'no', 'No', '0']:
+            logging.debug(f'... replying to mail ('+config['reply.disable']+')')
             reply_to_email(mail)
-            if config['post.action'] == 'delete':
-              delete_email(mail)
-            elif config['post.action'] == 'forward':
-              forward_email(mail)
-            elif config['post.action'] == 'move':
-              move_email(mail)
-            elif config['post.action'] == 'download':
-              download_email(mail)
-            else:
-              pass
+        # post action
+        if config['post.action'] == 'delete':
+          logging.debug(f'... deleting to mail')
+          delete_email(mail)
+        elif config['post.action'] == 'forward':
+          logging.debug(f'... forwarding mail')
+          forward_email(mail)
+        elif config['post.action'] == 'move':
+          logging.debug(f'... moving mail')
+          move_email(mail)
+        elif config['post.action'] == 'download':
+          logging.debug(f'... dowloading mail')
+          download_email(mail)
         else:
-            statistics['mails_wrong_sender'] += 1
-        statistics['mails_processed'] += 1
+          pass
+    else:
+        logging.debug(f'... sender not wanted')
+        statistics['mails_wrong_sender'] += 1
+    statistics['mails_processed'] += 1
 #    except Exception as e:
-#        log_warning("Unexpected error while processing email: '" + str(e) + "'.")
+#        logging.warning("Unexpected error while processing email: '" + str(e) + "'.")
 
 
 def reply_to_email(mail):
@@ -222,7 +241,7 @@ def reply_to_email(mail):
         receiver_emails = email.header.decode_header(mail['Reply-To'])
     except TypeError:
         receiver_emails = email.header.decode_header(mail['From'])
-    #get actual email adress, in case field entry is in form "John Doe <john@example.com>"    
+    #get actual email adress, in case field entry is in form "John Doe <john@example.com>"
     for x,e in receiver_emails:
       e = 'utf-8' if e is None else e
       y = x.decode(e) if isinstance(x,bytes) else x
@@ -238,20 +257,24 @@ def reply_to_email(mail):
 
 def forward_email(mail):
     global outgoing_mail_server
-    sender = email.header.decode_header(mail['From'])
+    mail_from = mail['From']
+    sender = email.header.decode_header(mail_from)
     parts = []
     for x,e in sender :
       e = 'utf-8' if e is None else e
       y = x.decode(e) if isinstance(x,bytes) else x
       parts.append(y)
     subject = mail['Subject']
-    prefix = '{} (from {})'.format(subject,' '.join(parts))  
+    prefix = '[Forward] {}'.format(subject)
     receiver_email = config['post.address']
-    message = mail #email.message_from_string(mail.as_string())
+    message = mail
     message.replace_header('Subject', prefix)
     message.replace_header("To", receiver_email)
     message.replace_header("From", email.utils.formataddr((
         cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail'])))
+    message["Reply-To"] = mail_from
+    logging.debug(f'... fowarding mail to {receiver_email}')
+#    logging.debug(message.headers)
     outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string().encode('utf-8'))
     delete_email(mail)
 
@@ -272,7 +295,7 @@ def check_local_path():
         shutdown_with_error("Local directory does not exist: "+path)
     if not os.access(path, os.W_OK):
         shutdown_with_error("Cannot write to local directory: "+path)
-        
+
 def download_email(mail):
     subject = email.header.decode_header(mail['Subject'])
     parts = []
@@ -290,11 +313,12 @@ def download_email(mail):
 
 def delete_email(mail):
     global incoming_mail_server
+    global statistics
     result = incoming_mail_server.uid('COPY', mail['mailserver_email_uid'], config['folders.trash'])
     if result[0] == "OK":
         statistics['mails_in_trash'] += 1
     else:
-        log_warning("Copying email to trash failed. Reason: " + str(result))
+        logging.warning("Copying email to trash failed. Reason: " + str(result))
     incoming_mail_server.uid('STORE', mail['mailserver_email_uid'], '+FLAGS', '(\Deleted)')
     incoming_mail_server.expunge()
 
@@ -324,11 +348,8 @@ def shutdown_with_error(message):
     shutdown(1)
 
 
-def log_warning(message):
-    print("Warning! " + message)
-
-
 def log_statistics():
+    global statistics
     run_time = datetime.datetime.now() - statistics['start_time']
     total_mails = statistics['mails_total']
     loading_errors = statistics['mails_loading_error']
@@ -337,13 +358,13 @@ def log_statistics():
     moving_errors = statistics['mails_processed'] - statistics['mails_in_trash'] - statistics['mails_wrong_sender']
     total_warnings = loading_errors + processing_errors + moving_errors
     message = "Executed "
-    message += "without warnings " if total_warnings is 0 else "with " + str(total_warnings) + " warnings "
+    message += "without warnings " if total_warnings == 0 else "with " + str(total_warnings) + " warnings "
     message += "in " + str(run_time.total_seconds()) + " seconds. "
     message += "Found " + str(total_mails) + " emails in inbox"
-    message += ". " if wrong_sender_count is 0 else " with " + str(wrong_sender_count) + " emails from wrong senders. "
+    message += ". " if wrong_sender_count == 0 else " with " + str(wrong_sender_count) + " emails from wrong senders. "
     message += "Processed " + str(statistics['mails_processed']) + \
                " emails, replied to " + str(total_mails - wrong_sender_count) + " emails. "
-    if total_warnings is not 0:
+    if total_warnings != 0:
         message += "Encountered " + str(loading_errors) + " errors while loading emails, " + \
                    str(processing_errors) + " errors while processing emails and " + \
                    str(moving_errors) + " errors while moving emails to trash."
@@ -376,5 +397,5 @@ def shutdown(error_code):
     if error_code != 0:
       raise SystemExit
 
-
-run()
+if __name__=='__main__':
+    run()
