@@ -192,7 +192,7 @@ def fetch_emails():
 
 
 def process_email(mail):
-    try:
+#    try:
         mail_from = email.header.decode_header(mail['From'])
         mail_sender = mail_from[-1]
         mail_sender = cast(mail_sender[0], str, 'UTF-8')
@@ -211,8 +211,8 @@ def process_email(mail):
         else:
             statistics['mails_wrong_sender'] += 1
         statistics['mails_processed'] += 1
-    except Exception as e:
-        log_warning("Unexpected error while processing email: '" + str(e) + "'.")
+#    except Exception as e:
+#        log_warning("Unexpected error while processing email: '" + str(e) + "'.")
 
 
 def reply_to_email(mail):
@@ -250,16 +250,12 @@ Forwarded email from {}
 
     '''.format(' '.join(parts))  
     message = email.message.Message(policy=email.policy.Compat32())
-    if mail.is_multipart():
-      payload=mail.get_payload()
-      text = payload[0].get_payload()
-      text = prefix + text
-      payload[0].set_payload(text,'utf-8')
-      message.set_payload(payload)
+    if message.is_multipart:
+      message.preamble = prefix
     else:
-      text=mail.get_payload()
-      text = prefix + text
-      message.set_payload(text,'utf-8')
+      payload=mail.get_payload()
+      payload = prefix + payload
+      message.set_payload(payload)
     receiver_email = config['post.address']
     message['Subject'] = 'Fwd: {}'.format(mail['Subject'])
     message['To'] = receiver_email
