@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python
 
 # Copyright (C) 2017-2019 sunborn23@github.com
 # Copyright (C) 2019 CDMIUB@github.com
@@ -8,7 +8,6 @@ import datetime
 import email
 import email.header
 import email.mime.text
-import email.mime.multipart
 import imaplib
 import os
 import re
@@ -18,6 +17,7 @@ from _socket import gaierror
 
 config = None
 config_file_path = "autoresponder.config.ini"
+config_file_path = "autoresponder.config.dev"
 incoming_mail_server = None
 outgoing_mail_server = None
 statistics = {
@@ -193,7 +193,7 @@ def fetch_emails():
 
 
 def process_email(mail):
-#    try:
+    try:
         mail_from = email.header.decode_header(mail['From'])
         mail_sender = mail_from[-1]
         mail_sender = cast(mail_sender[0], str, 'UTF-8')
@@ -212,8 +212,8 @@ def process_email(mail):
         else:
             statistics['mails_wrong_sender'] += 1
         statistics['mails_processed'] += 1
-#    except Exception as e:
-#        log_warning("Unexpected error while processing email: '" + str(e) + "'.")
+    except Exception as e:
+        log_warning("Unexpected error while processing email: '" + str(e) + "'.")
 
 
 def reply_to_email(mail):
@@ -244,15 +244,19 @@ def forward_email(mail):
       e = 'utf-8' if e is None else e
       y = x.decode(e) if isinstance(x,bytes) else x
       parts.append(y)
-    subject = mail['Subject']
-    prefix = '{} (from {})'.format(subject,' '.join(parts))  
+    prefix = '''
+    
+Forwarded email from {}
+------------------------------------------------------------------  
+
+    '''.format(' '.join(parts))  
+    message = email.mime.text.MIMEText(prefix + mail.as_string())
     receiver_email = config['post.address']
-    message = mail #email.message_from_string(mail.as_string())
-    message.replace_header('Subject', prefix)
-    message.replace_header("To", receiver_email)
-    message.replace_header("From", email.utils.formataddr((
-        cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail'])))
-    outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string().encode('utf-8'))
+    message['Subject'] = 'Fwd: {}'.format(mail['Subject'])
+    message['To'] = receiver_email
+    message['From'] = email.utils.formataddr((
+        cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail']))
+    outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string())
     delete_email(mail)
 
 def move_email(mail):
