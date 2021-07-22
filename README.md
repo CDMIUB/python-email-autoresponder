@@ -1,13 +1,13 @@
 # Python E-Mail Autoresponder
 
-Simple python script that connects to a mail server via IMAP and SMTP and replies to 
+Simple python script that connects to a mail server via IMAP and SMTP and replies to
 all emails in the inbox coming from a certain sender address using the Reply-To header.
 
 The user can select varoius action to take after a Mails has been replied
 to: leave as it is, delete, forward to another address (and delete from the
 inbox), move to a different folder on the imap server or download to a local
 directory (and delete from the inbox)
- 
+
 
 ### Dependencies
 
@@ -27,7 +27,7 @@ Alternatively, on UNIX systems you can run
 
 to download and then extract all project files.
 
-### Configuration 
+### Configuration
 
 Before first run, you need to adapt the project to your needs by editing the `autoresponder.config.ini` file with a text editor.
 
@@ -61,6 +61,7 @@ The required configuration items for the individual sections are listed below.
 | mail.request.from  | The sender email address to check new mails against. If an email is found in the inbox with this sender address, a reply is triggered. |
 | mail.reply.subject | The subject line of the reply email. |
 | mail.reply.body    | The plain text body of the reply email. |
+| mail.reply.disable | No reply is sent if the value is not "false", "no" or "0"; subject and body are ignored.   |
 
 **[post-reply action settings]**
 
@@ -75,11 +76,11 @@ After configuring the project, you can run it manually to test if your configura
 
 ### Manual Usage
 
-For testing purposes you can run the script from the shell. To do so, navigate to the project directory and run 
+For testing purposes you can run the script from the shell. To do so, navigate to the project directory and run
 
     python3 run_autoresponder.py
 
-If you want to run the script multiple times with different configurations on each executions, 
+If you want to run the script multiple times with different configurations on each executions,
 you can achieve that by running
 
     python3 run_autoresponder.py --config-path /the/path/to/your/config/file/autoresponder.config.ini
@@ -98,9 +99,9 @@ Then append to the file (replace "/the/path/to/the/project/folder" by the actual
 
 This will run the script every minute.
 
-You can use any [Online](https://crontab-generator.org/) 
-[Cron](https://www.freeformatter.com/cron-expression-generator-quartz.html) 
-[Expression](http://www.cronmaker.com/) 
+You can use any [Online](https://crontab-generator.org/)
+[Cron](https://www.freeformatter.com/cron-expression-generator-quartz.html)
+[Expression](http://www.cronmaker.com/)
 [Generator](http://cron.nmonitoring.com/cron-generator.html) for generating other cron expressions.
 
 For info on how to craft the cron expression yourself, run `man crontab`.
@@ -109,5 +110,5 @@ For info on how to craft the cron expression yourself, run `man crontab`.
 
 (C) 2017-2019 sunborn23@github.com
 
-(C) 2019 CDMIUB@github.com
+(C) 2019-2021 CDMIUB@github.com
 
