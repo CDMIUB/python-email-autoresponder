@@ -8,6 +8,7 @@ import datetime
 import email
 import email.header
 import email.mime.text
+import email.mime.multipart
 import imaplib
 import os
 import re
@@ -243,25 +244,15 @@ def forward_email(mail):
       e = 'utf-8' if e is None else e
       y = x.decode(e) if isinstance(x,bytes) else x
       parts.append(y)
-    prefix = '''
-    
-Forwarded email from {}
-------------------------------------------------------------------  
-
-    '''.format(' '.join(parts))  
-    message = email.message.Message(policy=email.policy.Compat32())
-    if message.is_multipart:
-      message.preamble = prefix
-    else:
-      payload=mail.get_payload()
-      payload = prefix + payload
-      message.set_payload(payload)
+    subject = mail['Subject']
+    prefix = '{} (from {})'.format(subject,' '.join(parts))  
     receiver_email = config['post.address']
-    message['Subject'] = 'Fwd: {}'.format(mail['Subject'])
-    message['To'] = receiver_email
-    message['From'] = email.utils.formataddr((
-        cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail']))
-    outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string())
+    message = mail #email.message_from_string(mail.as_string())
+    message.replace_header('Subject', prefix)
+    message.replace_header("To", receiver_email)
+    message.replace_header("From", email.utils.formataddr((
+        cast(email.header.Header(config['display.name'], 'utf-8'), str), config['display.mail'])))
+    outgoing_mail_server.sendmail(config['display.mail'], receiver_email, message.as_string().encode('utf-8'))
     delete_email(mail)
 
 def move_email(mail):
